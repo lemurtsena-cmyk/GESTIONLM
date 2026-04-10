@@ -14,12 +14,12 @@ def get_conn():
 
 def init_db():
     c = get_conn()
-    # Mise à jour du schéma : materiau -> hauteur, suppression stock_min
+    # Mise à jour : ajout de forme_pieds
     c.executescript("""
     CREATE TABLE IF NOT EXISTS produits(
         id INTEGER PRIMARY KEY, code TEXT UNIQUE, nom TEXT, categorie TEXT,
         hauteur INTEGER, longueur INTEGER, largeur INTEGER, couleur TEXT,
-        prix_achat INTEGER, prix_vente INTEGER, stock INTEGER DEFAULT 0
+        forme_pieds TEXT, prix_achat INTEGER, prix_vente INTEGER, stock INTEGER DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS clients(id INTEGER PRIMARY KEY, nom TEXT, tel TEXT);
     CREATE TABLE IF NOT EXISTS fournisseurs(id INTEGER PRIMARY KEY, nom TEXT, tel TEXT);
@@ -32,17 +32,17 @@ def init_db():
     );
     """)
     
-    # Données initiales si vide
-    df = pd.read_sql("SELECT COUNT(*) as n FROM produits", c)
-    if df.n[0]==0:
-        c.execute("INSERT INTO produits(code,nom,categorie,hauteur,longueur,largeur,couleur,prix_achat,prix_vente,stock) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                  ("TBL-MANG-160","Table à manger 6 pers","Salle à manger",75,160,90,"Marron",350000,520000,3))
-        c.execute("INSERT INTO fournisseurs(nom) VALUES ('Menuiserie Andry'),('Import Tana')")
-        c.execute("INSERT INTO clients(nom) VALUES ('Particulier'),('Hotel Sakura')")
+    # Correction automatique si la colonne forme_pieds manque (pour les anciennes installations)
+    try:
+        c.execute("ALTER TABLE produits ADD COLUMN forme_pieds TEXT")
+    except:
+        pass
+
     c.commit()
 
 init_db()
 conn = get_conn()
+
 
 # --- CONFIGURATION PAGE ---
 st.set_page_config(page_title="Melamine & Metallique", layout="wide", page_icon="🏗️")
@@ -88,46 +88,82 @@ if page=="Tableau de bord":
     st.dataframe(prod[["code","nom","stock","hauteur","longueur","largeur"]], use_container_width=True)
 
 # --- PRODUITS ---
-elif page=="Produits":
+if page=="Produits":
     st.header("📦 Catalogue des Produits")
-    df = pd.read_sql("SELECT * FROM produits", conn)
-    st.dataframe(df.assign(prix_achat=df.prix_achat.apply(mga), prix_vente=df.prix_vente.apply(mga)), use_container_width=True)
     
+    # Chargement des données
+    df = pd.read_sql("SELECT * FROM produits", conn)
+    
+    # Sélection des colonnes à afficher (on enlève prix_achat)
+    cols_display = ["code", "nom", "categorie", "longueur", "largeur", "hauteur", "couleur", "forme_pieds", "prix_vente", "stock"]
+    
+    if not df.empty:
+        # Formater le prix de vente pour l'affichage
+        df_view = df[cols_display].copy()
+        df_view["prix_vente"] = df_view["prix_vente"].apply(mga)
+        st.dataframe(df_view, use_container_width=True)
+    else:
+        st.info("Aucun produit enregistré.")
+
     col1, col2 = st.columns(2)
+    
     with col1:
         with st.expander("➕ Nouveau Produit"):
             with st.form("add"):
-                c1,c2,c3 = st.columns(3)
-                code=c1.text_input("Code"); nom=c2.text_input("Nom"); cat=c3.selectbox("Catégorie",["Table","Chaise","Bureau","Etagère","Autre"])
-                c1,c2,c3 = st.columns(3)
-                haut=c1.number_input("Hauteur cm",0); long=c2.number_input("Longueur cm",0); larg=c3.number_input("Largeur cm",0)
-                coul=st.text_input("Couleur")
-                pa=st.number_input("Prix d'achat (Ar)",0); pv=st.number_input("Prix de vente (Ar)",0)
-                stock=st.number_input("Stock initial",0)
+                nom = st.text_input("Nom du modèle (ex: Table Royale)")
+                c1, c2, c3 = st.columns(3)
+                cat = c1.selectbox("Catégorie", ["TABLE", "CHAISE", "BUREAU", "ETAGERE"])
+                coul = c2.text_input("Couleur")
+                pieds = c3.text_input("Forme pieds (ex: Carré, Épinglé)")
+                
+                c1, c2, c3 = st.columns(3)
+                long = c1.number_input("Longueur (cm)", 0)
+                larg = c2.number_input("Largeur (cm)", 0)
+                haut = c3.number_input("Hauteur (cm)", 0)
+                
+                c1, c2 = st.columns(2)
+                pa = c1.number_input("Prix d'achat (Ar)", 0)
+                pv = c2.number_input("Prix de vente (Ar)", 0)
+                stock = st.number_input("Stock initial", 0)
+                
                 if st.form_submit_button("Enregistrer"):
-                    conn.execute("INSERT INTO produits (code,nom,categorie,hauteur,longueur,largeur,couleur,prix_achat,prix_vente,stock) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                                 (code,nom,cat,haut,long,larg,coul,pa,pv,stock))
-                    conn.commit(); st.success("Ajouté !"); st.rerun()
-    
+                    # Génération automatique du code : CAT-LONG-LARG-HAUT-COUL-PIEDS
+                    # On nettoie les espaces et met en majuscules
+                    new_code = f"{cat}-{long}-{larg}-{haut}-{coul}-{pieds}".upper().replace(" ", "")
+                    
+                    try:
+                        conn.execute("""INSERT INTO produits 
+                            (code, nom, categorie, hauteur, longueur, largeur, couleur, forme_pieds, prix_achat, prix_vente, stock) 
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                            (new_code, nom, cat, haut, long, larg, coul, pieds, pa, pv, stock))
+                        conn.commit()
+                        st.success(f"Produit ajouté avec le code : {new_code}")
+                        st.rerun()
+                    except sqlite3.IntegrityError:
+                        st.error("Ce code produit existe déjà (combinaison dimensions/couleur identique).")
+
     with col2:
-        with st.expander("📝 Modifier ou Supprimer un produit"):
+        with st.expander("📝 Modifier ou Supprimer"):
             if not df.empty:
                 p_to_edit = st.selectbox("Choisir le produit", df.itertuples(), format_func=lambda x: f"{x.code} - {x.nom}")
                 with st.form("edit"):
-                    n_stock = st.number_input("Nouveau Stock", value=int(p_to_edit.stock))
-                    n_pa = st.number_input("Prix Achat (Ar)", value=int(p_to_edit.prix_achat))
+                    n_nom = st.text_input("Nom", value=p_to_edit.nom)
                     n_pv = st.number_input("Prix Vente (Ar)", value=int(p_to_edit.prix_vente))
+                    n_stock = st.number_input("Stock", value=int(p_to_edit.stock))
                     
                     c_upd, c_del = st.columns(2)
-                    
                     if c_upd.form_submit_button("💾 Mettre à jour"):
-                        conn.execute("UPDATE produits SET stock=?, prix_achat=?, prix_vente=? WHERE id=?", (n_stock, n_pa, n_pv, p_to_edit.id))
-                        conn.commit(); st.success("Mis à jour !"); st.rerun()
+                        conn.execute("UPDATE produits SET nom=?, prix_vente=?, stock=? WHERE id=?", 
+                                     (n_nom, n_pv, n_stock, p_to_edit.id))
+                        conn.commit()
+                        st.success("Mis à jour !")
+                        st.rerun()
                     
-                    if c_del.form_submit_button("🗑️ Supprimer le produit"):
-                        # Vérifier si le produit a des mouvements pour éviter les erreurs d'intégrité (optionnel mais conseillé)
+                    if c_del.form_submit_button("🗑️ Supprimer"):
                         conn.execute("DELETE FROM produits WHERE id=?", (p_to_edit.id,))
-                        conn.commit(); st.warning(f"Produit {p_to_edit.code} supprimé !"); st.rerun()
+                        conn.commit()
+                        st.warning("Produit supprimé.")
+                        st.rerun()
 # --- ENTREES ---
 elif page=="Entrées Stock":
     st.header("📥 Entrée de Marchandise")
