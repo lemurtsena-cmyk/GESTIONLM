@@ -5,7 +5,9 @@ import os
 
 DB = "gestion_tables_mga.db"
 
-# --- Utils ---
+# --- CONFIGURATION ET UTILS ---
+st.set_page_config(page_title="Melamine & Metallique", layout="wide", page_icon="🏗️")
+
 def mga(x): 
     return f"{int(x or 0):,}".replace(",", " ") + " Ar"
 
@@ -14,7 +16,6 @@ def get_conn():
 
 def init_db():
     c = get_conn()
-    # Mise à jour : ajout de forme_pieds
     c.executescript("""
     CREATE TABLE IF NOT EXISTS produits(
         id INTEGER PRIMARY KEY, code TEXT UNIQUE, nom TEXT, categorie TEXT,
@@ -31,21 +32,15 @@ def init_db():
         id INTEGER PRIMARY KEY, date TEXT, type TEXT, description TEXT, montant INTEGER
     );
     """)
-    
-    # Correction automatique si la colonne forme_pieds manque (pour les anciennes installations)
+    # Migration auto si colonne manquante
     try:
         c.execute("ALTER TABLE produits ADD COLUMN forme_pieds TEXT")
     except:
         pass
-
     c.commit()
 
 init_db()
 conn = get_conn()
-
-
-# --- CONFIGURATION PAGE ---
-st.set_page_config(page_title="Melamine & Metallique", layout="wide", page_icon="🏗️")
 
 # --- BARRE LATÉRALE ---
 with st.sidebar:
@@ -55,26 +50,20 @@ with st.sidebar:
         st.title("🏗️ Melamine & Metallique")
     
     st.divider()
-    page = st.radio("Menu de gestion", ["Tableau de bord", "Produits", "Entrées Stock", "Ventes", "Journalier", "Comptabilité"])
+    page = st.radio("Menu", ["Tableau de bord", "Produits", "Entrées Stock", "Ventes", "Journalier", "Comptabilité"])
     st.sidebar.caption("By Lemur tsena")
 
 # --- TABLEAU DE BORD ---
 if page=="Tableau de bord":
     st.header("📊 Tableau de bord")
-    
-    # Calculs Stock
     prod = pd.read_sql("SELECT * FROM produits", conn)
     valeur_stock = (prod["stock"] * prod["prix_achat"]).sum()
     
-    # Calculs Flux (Mouvements + Journal)
     mois_actuel = datetime.now().strftime("%Y-%m") + "%"
-    
-    # Recettes (Ventes produits + Recettes journalières)
     v_prod = pd.read_sql("SELECT SUM(qte*pu) as val FROM mouvements WHERE type='VENTE' AND date LIKE ?", conn, params=(mois_actuel,)).val[0] or 0
     r_jour = pd.read_sql("SELECT SUM(montant) as val FROM journal WHERE type='RECETTE' AND date LIKE ?", conn, params=(mois_actuel,)).val[0] or 0
     total_recettes = v_prod + r_jour
     
-    # Dépenses (Achats produits + Dépenses journalières)
     a_prod = pd.read_sql("SELECT SUM(qte*pu) as val FROM mouvements WHERE type='ACHAT' AND date LIKE ?", conn, params=(mois_actuel,)).val[0] or 0
     d_jour = pd.read_sql("SELECT SUM(montant) as val FROM journal WHERE type='DEPENSE' AND date LIKE ?", conn, params=(mois_actuel,)).val[0] or 0
     total_depenses = a_prod + d_jour
@@ -82,89 +71,73 @@ if page=="Tableau de bord":
     c1,c2,c3 = st.columns(3)
     c1.metric("Valeur du stock", mga(valeur_stock))
     c2.metric("Recettes (Mois)", mga(total_recettes))
-    c3.metric("Bénéfice Net estimé", mga(total_recettes - total_depenses))
+    c3.metric("Bénéfice Net (Mois)", mga(total_recettes - total_depenses))
     
     st.subheader("📦 État des stocks")
-    st.dataframe(prod[["code","nom","stock","hauteur","longueur","largeur"]], use_container_width=True)
+    st.dataframe(prod[["code","nom","stock","longueur","largeur","hauteur","forme_pieds"]], use_container_width=True)
 
 # --- PRODUITS ---
-if page=="Produits":
+elif page=="Produits":
     st.header("📦 Catalogue des Produits")
-    
-    # Chargement des données
     df = pd.read_sql("SELECT * FROM produits", conn)
     
-    # Sélection des colonnes à afficher (on enlève prix_achat)
-    cols_display = ["code", "nom", "categorie", "longueur", "largeur", "hauteur", "couleur", "forme_pieds", "prix_vente", "stock"]
+    # Affichage sans prix d'achat
+    df_view = df.drop(columns=['prix_achat'])
+    df_view['prix_vente'] = df_view['prix_vente'].apply(mga)
+    st.dataframe(df_view, use_container_width=True)
     
-    if not df.empty:
-        # Formater le prix de vente pour l'affichage
-        df_view = df[cols_display].copy()
-        df_view["prix_vente"] = df_view["prix_vente"].apply(mga)
-        st.dataframe(df_view, use_container_width=True)
-    else:
-        st.info("Aucun produit enregistré.")
-
     col1, col2 = st.columns(2)
-    
     with col1:
         with st.expander("➕ Nouveau Produit"):
-            with st.form("add"):
-                nom = st.text_input("Nom du modèle (ex: Table Royale)")
-                c1, c2, c3 = st.columns(3)
-                cat = c1.selectbox("Catégorie", ["TABLE", "CHAISE", "BUREAU", "ETAGERE"])
+            with st.form("add_prod"):
+                nom = st.text_input("Nom du modèle")
+                c1,c2,c3 = st.columns(3)
+                cat = c1.selectbox("Catégorie", ["TABLE", "CHAISE", "BUREAU", "ETAGERE", "AUTRE"])
                 coul = c2.text_input("Couleur")
-                pieds = c3.text_input("Forme pieds (ex: Carré, Épinglé)")
+                pieds = c3.text_input("Forme pieds")
                 
-                c1, c2, c3 = st.columns(3)
+                c1,c2,c3 = st.columns(3)
                 long = c1.number_input("Longueur (cm)", 0)
                 larg = c2.number_input("Largeur (cm)", 0)
                 haut = c3.number_input("Hauteur (cm)", 0)
                 
-                c1, c2 = st.columns(2)
+                c1,c2 = st.columns(2)
                 pa = c1.number_input("Prix d'achat (Ar)", 0)
                 pv = c2.number_input("Prix de vente (Ar)", 0)
                 stock = st.number_input("Stock initial", 0)
                 
                 if st.form_submit_button("Enregistrer"):
-                    # Génération automatique du code : CAT-LONG-LARG-HAUT-COUL-PIEDS
-                    # On nettoie les espaces et met en majuscules
-                    new_code = f"{cat}-{long}-{larg}-{haut}-{coul}-{pieds}".upper().replace(" ", "")
-                    
+                    # CODE AUTO: CATEGORIE-LONG-LARG-HAUT-COUL-PIEDS
+                    code_auto = f"{cat}-{long}-{larg}-{haut}-{coul}-{pieds}".upper().replace(" ", "")
                     try:
                         conn.execute("""INSERT INTO produits 
                             (code, nom, categorie, hauteur, longueur, largeur, couleur, forme_pieds, prix_achat, prix_vente, stock) 
                             VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                            (new_code, nom, cat, haut, long, larg, coul, pieds, pa, pv, stock))
+                            (code_auto, nom, cat, haut, long, larg, coul, pieds, pa, pv, stock))
                         conn.commit()
-                        st.success(f"Produit ajouté avec le code : {new_code}")
+                        st.success(f"Produit créé : {code_auto}")
                         st.rerun()
-                    except sqlite3.IntegrityError:
-                        st.error("Ce code produit existe déjà (combinaison dimensions/couleur identique).")
+                    except:
+                        st.error("Erreur : Ce code existe déjà ou les données sont invalides.")
 
     with col2:
-        with st.expander("📝 Modifier ou Supprimer"):
+        with st.expander("📝 Modifier / Supprimer"):
             if not df.empty:
-                p_to_edit = st.selectbox("Choisir le produit", df.itertuples(), format_func=lambda x: f"{x.code} - {x.nom}")
-                with st.form("edit"):
-                    n_nom = st.text_input("Nom", value=p_to_edit.nom)
-                    n_pv = st.number_input("Prix Vente (Ar)", value=int(p_to_edit.prix_vente))
-                    n_stock = st.number_input("Stock", value=int(p_to_edit.stock))
+                p_edit = st.selectbox("Produit à modifier", df.itertuples(), format_func=lambda x: f"{x.code} - {x.nom}")
+                with st.form("edit_prod"):
+                    n_nom = st.text_input("Nom", value=p_edit.nom)
+                    n_pv = st.number_input("Prix Vente", value=int(p_edit.prix_vente))
+                    n_stock = st.number_input("Stock", value=int(p_edit.stock))
                     
-                    c_upd, c_del = st.columns(2)
-                    if c_upd.form_submit_button("💾 Mettre à jour"):
-                        conn.execute("UPDATE produits SET nom=?, prix_vente=?, stock=? WHERE id=?", 
-                                     (n_nom, n_pv, n_stock, p_to_edit.id))
-                        conn.commit()
-                        st.success("Mis à jour !")
-                        st.rerun()
-                    
-                    if c_del.form_submit_button("🗑️ Supprimer"):
-                        conn.execute("DELETE FROM produits WHERE id=?", (p_to_edit.id,))
-                        conn.commit()
-                        st.warning("Produit supprimé.")
-                        st.rerun()
-# --- ENTREES ---
+                    b1, b2 = st.columns(2)
+                    if b1.form_submit_button("💾 Mettre à jour"):
+                        conn.execute("UPDATE produits SET nom=?, prix_vente=?, stock=? WHERE id=?", (n_nom, n_pv, n_stock, p_edit.id))
+                        conn.commit(); st.rerun()
+                    if b2.form_submit_button("🗑️ Supprimer"):
+                        conn.execute("DELETE FROM produits WHERE id=?", (p_edit.id,))
+                        conn.commit(); st.rerun()
+
+# --- ENTREES STOCK ---
 elif page=="Entrées Stock":
     st.header("📥 Entrée de Marchandise")
     prod = pd.read_sql("SELECT id, code, nom FROM produits", conn)
@@ -172,12 +145,13 @@ elif page=="Entrées Stock":
     with st.form("entree"):
         p = st.selectbox("Produit", prod.itertuples(), format_func=lambda x:f"{x.code} - {x.nom}")
         f = st.selectbox("Fournisseur", four.itertuples(), format_func=lambda x:x.nom)
-        qte = st.number_input("Quantité",1); pu = st.number_input("Prix unitaire achat (Ar)",0)
+        qte = st.number_input("Quantité", 1)
+        pu = st.number_input("Prix unitaire achat (Ar)", 0)
         if st.form_submit_button("Valider l'achat"):
             conn.execute("INSERT INTO mouvements(date,produit_id,type,qte,pu,tiers) VALUES (?,?,?,?,?,?)",
                          (datetime.now().isoformat(), p.id, 'ACHAT', qte, pu, f.nom))
             conn.execute("UPDATE produits SET stock=stock+?, prix_achat=? WHERE id=?",(qte, pu, p.id))
-            conn.commit(); st.success(f"Stock augmenté de {qte}")
+            conn.commit(); st.success("Stock mis à jour !")
 
 # --- VENTES ---
 elif page=="Ventes":
@@ -195,102 +169,62 @@ elif page=="Ventes":
                 conn.execute("INSERT INTO mouvements(date,produit_id,type,qte,pu,tiers,ref) VALUES (?,?,?,?,?,?,?)",
                              (datetime.now().isoformat(), p.id, 'VENTE', qte, pu, c.nom, ref))
                 conn.execute("UPDATE produits SET stock=stock-? WHERE id=?",(qte, p.id))
-                conn.commit(); st.success(f"Vente {ref} effectuée !"); st.balloons()
+                conn.commit(); st.balloons()
     else:
-        st.warning("Plus de stock disponible pour la vente.")
+        st.warning("Aucun stock disponible.")
 
-# --- JOURNALIER (MIS À JOUR) ---
+# --- JOURNALIER ---
 elif page=="Journalier":
     st.header("📒 Ventes et Dépenses Journalières")
-    st.info("Utilisez cette section pour les frais divers (loyer, transport, snacks) ou recettes hors produits.")
+    df_j = pd.read_sql("SELECT id, date, type, description, montant FROM journal ORDER BY date DESC", conn)
     
     col1, col2 = st.columns([1, 2])
-    
-    # Récupération des données pour l'affichage et la modification
-    df_j = pd.read_sql("SELECT id, date, type, description, montant FROM journal ORDER BY date DESC", conn)
-
     with col1:
-        # Onglets pour séparer Ajout et Modification
-        tab1, tab2 = st.tabs(["➕ Ajouter", "📝 Modifier / Suppr."])
-        
-        with tab1:
-            with st.form("journal_add"):
-                t_type = st.selectbox("Type", ["DEPENSE", "RECETTE"])
-                desc = st.text_input("Description (ex: Transport)")
-                montant = st.number_input("Montant (Ar)", min_value=0, step=500)
-                date_j = st.date_input("Date", datetime.now())
+        t_add, t_edit = st.tabs(["➕ Ajouter", "📝 Modifier / Suppr"])
+        with t_add:
+            with st.form("add_j"):
+                typ = st.selectbox("Type", ["DEPENSE", "RECETTE"])
+                des = st.text_input("Description")
+                mnt = st.number_input("Montant (Ar)", 0)
+                dat = st.date_input("Date", datetime.now())
                 if st.form_submit_button("Enregistrer"):
-                    conn.execute("INSERT INTO journal(date, type, description, montant) VALUES (?,?,?,?)",
-                                 (date_j.isoformat(), t_type, desc, montant))
-                    conn.commit()
-                    st.success("Enregistré !")
-                    st.rerun()
-
-        with tab2:
+                    conn.execute("INSERT INTO journal(date,type,description,montant) VALUES (?,?,?,?)", (dat.isoformat(), typ, des, mnt))
+                    conn.commit(); st.rerun()
+        with t_edit:
             if not df_j.empty:
-                # On crée une liste pour le selectbox avec un format lisible
-                edit_choice = st.selectbox(
-                    "Choisir l'opération à modifier", 
-                    df_j.itertuples(), 
-                    format_func=lambda x: f"{x.date} | {x.type} | {x.description} ({x.montant} Ar)"
-                )
-                
-                with st.form("journal_edit"):
-                    e_type = st.selectbox("Type", ["DEPENSE", "RECETTE"], index=0 if edit_choice.type == "DEPENSE" else 1)
-                    e_desc = st.text_input("Description", value=edit_choice.description)
-                    e_montant = st.number_input("Montant (Ar)", min_value=0, value=int(edit_choice.montant))
-                    e_date = st.date_input("Date", value=datetime.strptime(edit_choice.date, '%Y-%m-%d'))
-                    
-                    c_edit, c_del = st.columns(2)
-                    if c_edit.form_submit_button("💾 Mettre à jour"):
-                        conn.execute("""UPDATE journal SET date=?, type=?, description=?, montant=? WHERE id=?""",
-                                     (e_date.isoformat(), e_type, e_desc, e_montant, edit_choice.id))
-                        conn.commit()
-                        st.success("Modifié !")
-                        st.rerun()
-                    
-                    if c_del.form_submit_button("🗑️ Supprimer"):
-                        conn.execute("DELETE FROM journal WHERE id=?", (edit_choice.id,))
-                        conn.commit()
-                        st.warning("Supprimé !")
-                        st.rerun()
-            else:
-                st.write("Aucune donnée à modifier.")
-    
-    with col2:
-        st.subheader("Dernières opérations")
-        if not df_j.empty:
-            # On affiche sans la colonne ID pour l'esthétique
-            st.dataframe(df_j.drop(columns=['id']), use_container_width=True)
-        else:
-            st.info("Le journal est vide.")
+                item = st.selectbox("Opération", df_j.itertuples(), format_func=lambda x: f"{x.date} | {x.description}")
+                with st.form("edit_j"):
+                    e_des = st.text_input("Description", value=item.description)
+                    e_mnt = st.number_input("Montant", value=int(item.montant))
+                    b1, b2 = st.columns(2)
+                    if b1.form_submit_button("💾 Maj"):
+                        conn.execute("UPDATE journal SET description=?, montant=? WHERE id=?", (e_des, e_mnt, item.id))
+                        conn.commit(); st.rerun()
+                    if b2.form_submit_button("🗑️ Suppr"):
+                        conn.execute("DELETE FROM journal WHERE id=?", (item.id,))
+                        conn.commit(); st.rerun()
 
-# --- COMPTA ---
+    with col2:
+        st.dataframe(df_j.drop(columns=['id']), use_container_width=True)
+
+# --- COMPTABILITÉ ---
 else:
     st.header("💰 Comptabilité")
-    
-    # Données Mouvements (Produits)
     mouv = pd.read_sql("SELECT type, (qte*pu) as montant FROM mouvements", conn)
-    # Données Journal (Divers)
     jour = pd.read_sql("SELECT type, montant FROM journal", conn)
     
-    # Calculs croisés
-    recettes_total = mouv[mouv.type=='VENTE']["montant"].sum() + jour[jour.type=='RECETTE']["montant"].sum()
-    depenses_total = mouv[mouv.type=='ACHAT']["montant"].sum() + jour[jour.type=='DEPENSE']["montant"].sum()
+    recettes = mouv[mouv.type=='VENTE']["montant"].sum() + jour[jour.type=='RECETTE']["montant"].sum()
+    depenses = mouv[mouv.type=='ACHAT']["montant"].sum() + jour[jour.type=='DEPENSE']["montant"].sum()
     
     c1,c2,c3 = st.columns(3)
-    c1.metric("Recettes Totales", mga(recettes_total))
-    c2.metric("Dépenses Totales", mga(depenses_total))
-    c3.metric("Solde (Profit)", mga(recettes_total - depenses_total))
+    c1.metric("Total Recettes", mga(recettes))
+    c2.metric("Total Dépenses", mga(depenses))
+    c3.metric("Profit Global", mga(recettes - depenses))
     
-    st.subheader("Historique global (Flux journaliers + Ventes)")
-    # Fusion des données pour graphique
+    # Graphique
     m_plot = pd.read_sql("SELECT substr(date,1,10) as date, (qte*pu) as montant, type FROM mouvements", conn)
     j_plot = pd.read_sql("SELECT substr(date,1,10) as date, montant, type FROM journal", conn)
-    
     total_data = pd.concat([m_plot, j_plot])
     if not total_data.empty:
-        # On traite les dépenses comme négatives pour le graphique
         total_data['valeur'] = total_data.apply(lambda x: x['montant'] if x['type'] in ['VENTE', 'RECETTE'] else -x['montant'], axis=1)
-        chart_data = total_data.groupby('date')['valeur'].sum()
-        st.line_chart(chart_data)
+        st.line_chart(total_data.groupby('date')['valeur'].sum())
