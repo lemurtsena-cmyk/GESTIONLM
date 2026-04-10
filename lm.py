@@ -156,27 +156,71 @@ elif page=="Ventes":
     else:
         st.warning("Plus de stock disponible pour la vente.")
 
-# --- JOURNALIER (NOUVEAU) ---
+# --- JOURNALIER (MIS À JOUR) ---
 elif page=="Journalier":
     st.header("📒 Ventes et Dépenses Journalières")
     st.info("Utilisez cette section pour les frais divers (loyer, transport, snacks) ou recettes hors produits.")
     
     col1, col2 = st.columns([1, 2])
+    
+    # Récupération des données pour l'affichage et la modification
+    df_j = pd.read_sql("SELECT id, date, type, description, montant FROM journal ORDER BY date DESC", conn)
+
     with col1:
-        with st.form("journal"):
-            t_type = st.selectbox("Type", ["DEPENSE", "RECETTE"])
-            desc = st.text_input("Description (ex: Transport, Petit déjeuner)")
-            montant = st.number_input("Montant (Ar)", min_value=0, step=500)
-            date_j = st.date_input("Date", datetime.now())
-            if st.form_submit_button("Enregistrer"):
-                conn.execute("INSERT INTO journal(date, type, description, montant) VALUES (?,?,?,?)",
-                             (date_j.isoformat(), t_type, desc, montant))
-                conn.commit(); st.success("Enregistré !"); st.rerun()
+        # Onglets pour séparer Ajout et Modification
+        tab1, tab2 = st.tabs(["➕ Ajouter", "📝 Modifier / Suppr."])
+        
+        with tab1:
+            with st.form("journal_add"):
+                t_type = st.selectbox("Type", ["DEPENSE", "RECETTE"])
+                desc = st.text_input("Description (ex: Transport)")
+                montant = st.number_input("Montant (Ar)", min_value=0, step=500)
+                date_j = st.date_input("Date", datetime.now())
+                if st.form_submit_button("Enregistrer"):
+                    conn.execute("INSERT INTO journal(date, type, description, montant) VALUES (?,?,?,?)",
+                                 (date_j.isoformat(), t_type, desc, montant))
+                    conn.commit()
+                    st.success("Enregistré !")
+                    st.rerun()
+
+        with tab2:
+            if not df_j.empty:
+                # On crée une liste pour le selectbox avec un format lisible
+                edit_choice = st.selectbox(
+                    "Choisir l'opération à modifier", 
+                    df_j.itertuples(), 
+                    format_func=lambda x: f"{x.date} | {x.type} | {x.description} ({x.montant} Ar)"
+                )
+                
+                with st.form("journal_edit"):
+                    e_type = st.selectbox("Type", ["DEPENSE", "RECETTE"], index=0 if edit_choice.type == "DEPENSE" else 1)
+                    e_desc = st.text_input("Description", value=edit_choice.description)
+                    e_montant = st.number_input("Montant (Ar)", min_value=0, value=int(edit_choice.montant))
+                    e_date = st.date_input("Date", value=datetime.strptime(edit_choice.date, '%Y-%m-%d'))
+                    
+                    c_edit, c_del = st.columns(2)
+                    if c_edit.form_submit_button("💾 Mettre à jour"):
+                        conn.execute("""UPDATE journal SET date=?, type=?, description=?, montant=? WHERE id=?""",
+                                     (e_date.isoformat(), e_type, e_desc, e_montant, edit_choice.id))
+                        conn.commit()
+                        st.success("Modifié !")
+                        st.rerun()
+                    
+                    if c_del.form_submit_button("🗑️ Supprimer"):
+                        conn.execute("DELETE FROM journal WHERE id=?", (edit_choice.id,))
+                        conn.commit()
+                        st.warning("Supprimé !")
+                        st.rerun()
+            else:
+                st.write("Aucune donnée à modifier.")
     
     with col2:
-        df_j = pd.read_sql("SELECT date, type, description, montant FROM journal ORDER BY date DESC LIMIT 20", conn)
         st.subheader("Dernières opérations")
-        st.table(df_j)
+        if not df_j.empty:
+            # On affiche sans la colonne ID pour l'esthétique
+            st.dataframe(df_j.drop(columns=['id']), use_container_width=True)
+        else:
+            st.info("Le journal est vide.")
 
 # --- COMPTA ---
 else:
