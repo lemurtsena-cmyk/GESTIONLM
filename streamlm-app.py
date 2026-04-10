@@ -14,11 +14,12 @@ def get_conn():
 
 def init_db():
     c = get_conn()
+    # Mise à jour du schéma : materiau -> hauteur, suppression stock_min
     c.executescript("""
     CREATE TABLE IF NOT EXISTS produits(
         id INTEGER PRIMARY KEY, code TEXT UNIQUE, nom TEXT, categorie TEXT,
-        materiau TEXT, longueur INTEGER, largeur INTEGER, couleur TEXT,
-        prix_achat INTEGER, prix_vente INTEGER, stock INTEGER DEFAULT 0, stock_min INTEGER DEFAULT 2
+        hauteur INTEGER, longueur INTEGER, largeur INTEGER, couleur TEXT,
+        prix_achat INTEGER, prix_vente INTEGER, stock INTEGER DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS clients(id INTEGER PRIMARY KEY, nom TEXT, tel TEXT);
     CREATE TABLE IF NOT EXISTS fournisseurs(id INTEGER PRIMARY KEY, nom TEXT, tel TEXT);
@@ -26,11 +27,16 @@ def init_db():
         id INTEGER PRIMARY KEY, date TEXT, produit_id INTEGER, type TEXT,
         qte INTEGER, pu INTEGER, tiers TEXT, ref TEXT
     );
+    CREATE TABLE IF NOT EXISTS journal(
+        id INTEGER PRIMARY KEY, date TEXT, type TEXT, description TEXT, montant INTEGER
+    );
     """)
+    
+    # Données initiales si vide
     df = pd.read_sql("SELECT COUNT(*) as n FROM produits", c)
     if df.n[0]==0:
-        c.execute("INSERT INTO produits(code,nom,categorie,materiau,longueur,largeur,couleur,prix_achat,prix_vente,stock,stock_min) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                  ("TBL-MANG-160","Table à manger 6 pers","Salle à manger","Bois",160,90,"Marron",350000,520000,3,2))
+        c.execute("INSERT INTO produits(code,nom,categorie,hauteur,longueur,largeur,couleur,prix_achat,prix_vente,stock) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                  ("TBL-MANG-160","Table à manger 6 pers","Salle à manger",75,160,90,"Marron",350000,520000,3))
         c.execute("INSERT INTO fournisseurs(nom) VALUES ('Menuiserie Andry'),('Import Tana')")
         c.execute("INSERT INTO clients(nom) VALUES ('Particulier'),('Hotel Sakura')")
     c.commit()
@@ -41,40 +47,45 @@ conn = get_conn()
 # --- CONFIGURATION PAGE ---
 st.set_page_config(page_title="Melamine & Metallique", layout="wide", page_icon="🏗️")
 
-# --- BARRE LATÉRALE (LOGO ICI) ---
+# --- BARRE LATÉRALE ---
 with st.sidebar:
-    # Affichage du logo
     if os.path.exists("logo.jpg"):
         st.image("logo.jpg", use_container_width=True)
     else:
         st.title("🏗️ Melamine & Metallique")
-        st.info("Astuce : Placez 'logo.jpg' dans le dossier du script pour voir le logo.")
     
     st.divider()
-    page = st.radio("Menu de gestion", ["Tableau de bord","Produits","Entrées Stock","Ventes","Comptabilité"])
+    page = st.radio("Menu de gestion", ["Tableau de bord", "Produits", "Entrées Stock", "Ventes", "Journalier", "Comptabilité"])
     st.sidebar.caption("By Lemur tsena")
 
 # --- TABLEAU DE BORD ---
 if page=="Tableau de bord":
     st.header("📊 Tableau de bord")
+    
+    # Calculs Stock
     prod = pd.read_sql("SELECT * FROM produits", conn)
-    prod["valeur_stock"] = prod["stock"] * prod["prix_achat"]
-    valeur = prod["valeur_stock"].sum()
+    valeur_stock = (prod["stock"] * prod["prix_achat"]).sum()
     
-    ventes_mois = pd.read_sql("SELECT SUM(qte*pu) as ca FROM mouvements WHERE type='VENTE' AND date LIKE ?", conn, params=(datetime.now().strftime("%Y-%m")+"%",))
-    ca = ventes_mois.ca[0] or 0
+    # Calculs Flux (Mouvements + Journal)
+    mois_actuel = datetime.now().strftime("%Y-%m") + "%"
     
-    achats_mois = pd.read_sql("SELECT SUM(qte*pu) as achat FROM mouvements WHERE type='ACHAT' AND date LIKE ?", conn, params=(datetime.now().strftime("%Y-%m")+"%",))
-    achat = achats_mois.achat[0] or 0
+    # Recettes (Ventes produits + Recettes journalières)
+    v_prod = pd.read_sql("SELECT SUM(qte*pu) as val FROM mouvements WHERE type='VENTE' AND date LIKE ?", conn, params=(mois_actuel,)).val[0] or 0
+    r_jour = pd.read_sql("SELECT SUM(montant) as val FROM journal WHERE type='RECETTE' AND date LIKE ?", conn, params=(mois_actuel,)).val[0] or 0
+    total_recettes = v_prod + r_jour
+    
+    # Dépenses (Achats produits + Dépenses journalières)
+    a_prod = pd.read_sql("SELECT SUM(qte*pu) as val FROM mouvements WHERE type='ACHAT' AND date LIKE ?", conn, params=(mois_actuel,)).val[0] or 0
+    d_jour = pd.read_sql("SELECT SUM(montant) as val FROM journal WHERE type='DEPENSE' AND date LIKE ?", conn, params=(mois_actuel,)).val[0] or 0
+    total_depenses = a_prod + d_jour
 
     c1,c2,c3 = st.columns(3)
-    c1.metric("Valeur du stock", mga(valeur))
-    c2.metric("CA du mois", mga(ca))
-    c3.metric("Bénéfice brut", mga(ca-achat))
+    c1.metric("Valeur du stock", mga(valeur_stock))
+    c2.metric("Recettes (Mois)", mga(total_recettes))
+    c3.metric("Bénéfice Net estimé", mga(total_recettes - total_depenses))
     
-    alertes = prod[prod.stock <= prod.stock_min]
-    st.subheader("⚠️ Alertes Stock")
-    st.dataframe(alertes[["code","nom","stock","stock_min"]], use_container_width=True)
+    st.subheader("📦 État des stocks")
+    st.dataframe(prod[["code","nom","stock","hauteur","longueur","largeur"]], use_container_width=True)
 
 # --- PRODUITS ---
 elif page=="Produits":
@@ -89,12 +100,13 @@ elif page=="Produits":
                 c1,c2,c3 = st.columns(3)
                 code=c1.text_input("Code"); nom=c2.text_input("Nom"); cat=c3.selectbox("Catégorie",["Table","Chaise","Bureau","Etagère","Autre"])
                 c1,c2,c3 = st.columns(3)
-                mat=c1.text_input("Matériau"); long=c2.number_input("Longueur cm",0); larg=c3.number_input("Largeur cm",0)
+                haut=c1.number_input("Hauteur cm",0); long=c2.number_input("Longueur cm",0); larg=c3.number_input("Largeur cm",0)
                 coul=st.text_input("Couleur")
                 pa=st.number_input("Prix d'achat (Ar)",0); pv=st.number_input("Prix de vente (Ar)",0)
-                stock=st.number_input("Stock initial",0); smin=st.number_input("Stock alerte",2)
+                stock=st.number_input("Stock initial",0)
                 if st.form_submit_button("Enregistrer"):
-                    conn.execute("INSERT INTO produits VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?)",(code,nom,cat,mat,long,larg,coul,pa,pv,stock,smin))
+                    conn.execute("INSERT INTO produits (code,nom,categorie,hauteur,longueur,largeur,couleur,prix_achat,prix_vente,stock) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                                 (code,nom,cat,haut,long,larg,coul,pa,pv,stock))
                     conn.commit(); st.success("Ajouté !"); st.rerun()
     
     with col2:
@@ -144,17 +156,54 @@ elif page=="Ventes":
     else:
         st.warning("Plus de stock disponible pour la vente.")
 
+# --- JOURNALIER (NOUVEAU) ---
+elif page=="Journalier":
+    st.header("📒 Ventes et Dépenses Journalières")
+    st.info("Utilisez cette section pour les frais divers (loyer, transport, snacks) ou recettes hors produits.")
+    
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        with st.form("journal"):
+            t_type = st.selectbox("Type", ["DEPENSE", "RECETTE"])
+            desc = st.text_input("Description (ex: Transport, Petit déjeuner)")
+            montant = st.number_input("Montant (Ar)", min_value=0, step=500)
+            date_j = st.date_input("Date", datetime.now())
+            if st.form_submit_button("Enregistrer"):
+                conn.execute("INSERT INTO journal(date, type, description, montant) VALUES (?,?,?,?)",
+                             (date_j.isoformat(), t_type, desc, montant))
+                conn.commit(); st.success("Enregistré !"); st.rerun()
+    
+    with col2:
+        df_j = pd.read_sql("SELECT date, type, description, montant FROM journal ORDER BY date DESC LIMIT 20", conn)
+        st.subheader("Dernières opérations")
+        st.table(df_j)
+
 # --- COMPTA ---
 else:
     st.header("💰 Comptabilité")
-    mouv = pd.read_sql("SELECT * FROM mouvements", conn)
-    if not mouv.empty:
-        mouv["montant"] = mouv["qte"]*mouv["pu"]
-        ca = mouv[mouv.type=='VENTE']["montant"].sum()
-        achat = mouv[mouv.type=='ACHAT']["montant"].sum()
-        c1,c2,c3 = st.columns(3)
-        c1.metric("Recettes (Ventes)", mga(ca))
-        c2.metric("Dépenses (Achats)", mga(achat))
-        c3.metric("Solde", mga(ca - achat))
-        st.subheader("Historique des flux financiers")
-        st.line_chart(mouv.groupby(mouv.date.str[:10])["montant"].sum())
+    
+    # Données Mouvements (Produits)
+    mouv = pd.read_sql("SELECT type, (qte*pu) as montant FROM mouvements", conn)
+    # Données Journal (Divers)
+    jour = pd.read_sql("SELECT type, montant FROM journal", conn)
+    
+    # Calculs croisés
+    recettes_total = mouv[mouv.type=='VENTE']["montant"].sum() + jour[jour.type=='RECETTE']["montant"].sum()
+    depenses_total = mouv[mouv.type=='ACHAT']["montant"].sum() + jour[jour.type=='DEPENSE']["montant"].sum()
+    
+    c1,c2,c3 = st.columns(3)
+    c1.metric("Recettes Totales", mga(recettes_total))
+    c2.metric("Dépenses Totales", mga(depenses_total))
+    c3.metric("Solde (Profit)", mga(recettes_total - depenses_total))
+    
+    st.subheader("Historique global (Flux journaliers + Ventes)")
+    # Fusion des données pour graphique
+    m_plot = pd.read_sql("SELECT substr(date,1,10) as date, (qte*pu) as montant, type FROM mouvements", conn)
+    j_plot = pd.read_sql("SELECT substr(date,1,10) as date, montant, type FROM journal", conn)
+    
+    total_data = pd.concat([m_plot, j_plot])
+    if not total_data.empty:
+        # On traite les dépenses comme négatives pour le graphique
+        total_data['valeur'] = total_data.apply(lambda x: x['montant'] if x['type'] in ['VENTE', 'RECETTE'] else -x['montant'], axis=1)
+        chart_data = total_data.groupby('date')['valeur'].sum()
+        st.line_chart(chart_data)
