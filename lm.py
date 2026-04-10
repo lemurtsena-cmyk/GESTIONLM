@@ -42,6 +42,14 @@ def init_db():
 init_db()
 conn = get_conn()
 
+# --- LISTES DE CHOIX ---
+LISTE_PIEDS = ["/U", "/V", "/X", "/K", "/PLIABLE", "/TABOURET CARRE", "/TABOURET CERCLE"]
+LISTE_COULEURS = [
+    "/BLANC UNIS", "/NOIR UNIS", "/GRIS MARBRE", "#1023", "#1025", "#805", 
+    "#806", "#506", "#16854", "#16855", "#1010", "#8042", "#8052", 
+    "#932", "#809", "#308 BM", "#7058", "#76-1"
+]
+
 # --- BARRE LATÉRALE ---
 with st.sidebar:
     if os.path.exists("logo mm.jpg"):
@@ -93,8 +101,8 @@ elif page=="Produits":
                 nom = st.text_input("Nom du modèle")
                 c1,c2,c3 = st.columns(3)
                 cat = c1.selectbox("Catégorie", ["TABLE", "CHAISE", "BUREAU", "ETAGERE", "AUTRE"])
-                coul = c2.text_input("Couleur")
-                pieds = c3.text_input("Forme pieds")
+                coul = c2.selectbox("Couleur", LISTE_COULEURS)
+                pieds = c3.selectbox("Forme pieds", LISTE_PIEDS)
                 
                 c1,c2,c3 = st.columns(3)
                 long = c1.number_input("Longueur (cm)", 0)
@@ -107,8 +115,11 @@ elif page=="Produits":
                 stock = st.number_input("Stock initial", 0)
                 
                 if st.form_submit_button("Enregistrer"):
-                    # CODE AUTO: CATEGORIE-LONG-LARG-HAUT-COUL-PIEDS
-                    code_auto = f"{cat}-{long}-{larg}-{haut}-{coul}-{pieds}".upper().replace(" ", "")
+                    # Nettoyage des caractères spéciaux pour le code (enlève / et # pour plus de clarté)
+                    c_clean = coul.replace("/", "").replace("#", "")
+                    p_clean = pieds.replace("/", "")
+                    code_auto = f"{cat}-{long}-{larg}-{haut}-{c_clean}-{p_clean}".upper().replace(" ", "")
+                    
                     try:
                         conn.execute("""INSERT INTO produits 
                             (code, nom, categorie, hauteur, longueur, largeur, couleur, forme_pieds, prix_achat, prix_vente, stock) 
