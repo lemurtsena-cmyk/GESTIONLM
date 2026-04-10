@@ -110,17 +110,24 @@ elif page=="Produits":
                     conn.commit(); st.success("Ajouté !"); st.rerun()
     
     with col2:
-        with st.expander("📝 Modifier Stock / Prix"):
+        with st.expander("📝 Modifier ou Supprimer un produit"):
             if not df.empty:
                 p_to_edit = st.selectbox("Choisir le produit", df.itertuples(), format_func=lambda x: f"{x.code} - {x.nom}")
                 with st.form("edit"):
                     n_stock = st.number_input("Nouveau Stock", value=int(p_to_edit.stock))
                     n_pa = st.number_input("Prix Achat (Ar)", value=int(p_to_edit.prix_achat))
                     n_pv = st.number_input("Prix Vente (Ar)", value=int(p_to_edit.prix_vente))
-                    if st.form_submit_button("Mettre à jour"):
+                    
+                    c_upd, c_del = st.columns(2)
+                    
+                    if c_upd.form_submit_button("💾 Mettre à jour"):
                         conn.execute("UPDATE produits SET stock=?, prix_achat=?, prix_vente=? WHERE id=?", (n_stock, n_pa, n_pv, p_to_edit.id))
                         conn.commit(); st.success("Mis à jour !"); st.rerun()
-
+                    
+                    if c_del.form_submit_button("🗑️ Supprimer le produit"):
+                        # Vérifier si le produit a des mouvements pour éviter les erreurs d'intégrité (optionnel mais conseillé)
+                        conn.execute("DELETE FROM produits WHERE id=?", (p_to_edit.id,))
+                        conn.commit(); st.warning(f"Produit {p_to_edit.code} supprimé !"); st.rerun()
 # --- ENTREES ---
 elif page=="Entrées Stock":
     st.header("📥 Entrée de Marchandise")
