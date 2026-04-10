@@ -32,7 +32,6 @@ def init_db():
         id INTEGER PRIMARY KEY, date TEXT, type TEXT, description TEXT, montant INTEGER
     );
     """)
-    # Migration auto si colonne manquante
     try:
         c.execute("ALTER TABLE produits ADD COLUMN forme_pieds TEXT")
     except:
@@ -89,7 +88,6 @@ elif page=="Produits":
     st.header("📦 Catalogue des Produits")
     df = pd.read_sql("SELECT * FROM produits", conn)
     
-    # Affichage sans prix d'achat
     df_view = df.drop(columns=['prix_achat'])
     df_view['prix_vente'] = df_view['prix_vente'].apply(mga)
     st.dataframe(df_view, use_container_width=True)
@@ -98,7 +96,7 @@ elif page=="Produits":
     with col1:
         with st.expander("➕ Nouveau Produit"):
             with st.form("add_prod"):
-                nom = st.text_input("Nom du modèle")
+                st.info("Le NOM et le CODE sont générés automatiquement.")
                 c1,c2,c3 = st.columns(3)
                 cat = c1.selectbox("Catégorie", ["TABLE", "CHAISE", "BUREAU", "ETAGERE", "AUTRE"])
                 coul = c2.selectbox("Couleur", LISTE_COULEURS)
@@ -115,7 +113,10 @@ elif page=="Produits":
                 stock = st.number_input("Stock initial", 0)
                 
                 if st.form_submit_button("Enregistrer"):
-                    # Nettoyage des caractères spéciaux pour le code (enlève / et # pour plus de clarté)
+                    # AUTOMATISATION NOM : CATEGORIE.LONGUEUR.LARGEUR.FORME PIED
+                    nom_auto = f"{cat}.{long}.{larg}.{pieds}"
+                    
+                    # AUTOMATISATION CODE : CAT-LONG-LARG-HAUT-COUL-PIEDS
                     c_clean = coul.replace("/", "").replace("#", "")
                     p_clean = pieds.replace("/", "")
                     code_auto = f"{cat}-{long}-{larg}-{haut}-{c_clean}-{p_clean}".upper().replace(" ", "")
@@ -124,9 +125,9 @@ elif page=="Produits":
                         conn.execute("""INSERT INTO produits 
                             (code, nom, categorie, hauteur, longueur, largeur, couleur, forme_pieds, prix_achat, prix_vente, stock) 
                             VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                            (code_auto, nom, cat, haut, long, larg, coul, pieds, pa, pv, stock))
+                            (code_auto, nom_auto, cat, haut, long, larg, coul, pieds, pa, pv, stock))
                         conn.commit()
-                        st.success(f"Produit créé : {code_auto}")
+                        st.success(f"Produit créé : {nom_auto}")
                         st.rerun()
                     except:
                         st.error("Erreur : Ce code existe déjà ou les données sont invalides.")
@@ -134,15 +135,15 @@ elif page=="Produits":
     with col2:
         with st.expander("📝 Modifier / Supprimer"):
             if not df.empty:
-                p_edit = st.selectbox("Produit à modifier", df.itertuples(), format_func=lambda x: f"{x.code} - {x.nom}")
+                p_edit = st.selectbox("Produit à modifier", df.itertuples(), format_func=lambda x: f"{x.nom} ({x.code})")
                 with st.form("edit_prod"):
-                    n_nom = st.text_input("Nom", value=p_edit.nom)
+                    st.write(f"Modification de : **{p_edit.nom}**")
                     n_pv = st.number_input("Prix Vente", value=int(p_edit.prix_vente))
                     n_stock = st.number_input("Stock", value=int(p_edit.stock))
                     
                     b1, b2 = st.columns(2)
                     if b1.form_submit_button("💾 Mettre à jour"):
-                        conn.execute("UPDATE produits SET nom=?, prix_vente=?, stock=? WHERE id=?", (n_nom, n_pv, n_stock, p_edit.id))
+                        conn.execute("UPDATE produits SET prix_vente=?, stock=? WHERE id=?", (n_pv, n_stock, p_edit.id))
                         conn.commit(); st.rerun()
                     if b2.form_submit_button("🗑️ Supprimer"):
                         conn.execute("DELETE FROM produits WHERE id=?", (p_edit.id,))
@@ -154,7 +155,7 @@ elif page=="Entrées Stock":
     prod = pd.read_sql("SELECT id, code, nom FROM produits", conn)
     four = pd.read_sql("SELECT * FROM fournisseurs", conn)
     with st.form("entree"):
-        p = st.selectbox("Produit", prod.itertuples(), format_func=lambda x:f"{x.code} - {x.nom}")
+        p = st.selectbox("Produit", prod.itertuples(), format_func=lambda x:f"{x.nom} ({x.code})")
         f = st.selectbox("Fournisseur", four.itertuples(), format_func=lambda x:x.nom)
         qte = st.number_input("Quantité", 1)
         pu = st.number_input("Prix unitaire achat (Ar)", 0)
@@ -171,7 +172,7 @@ elif page=="Ventes":
     cli = pd.read_sql("SELECT * FROM clients", conn)
     if not prod.empty:
         with st.form("vente"):
-            p = st.selectbox("Produit", prod.itertuples(), format_func=lambda x:f"{x.code} (Stock:{x.stock})")
+            p = st.selectbox("Produit", prod.itertuples(), format_func=lambda x:f"{x.nom} (Stock:{x.stock})")
             c = st.selectbox("Client", cli.itertuples(), format_func=lambda x:x.nom)
             qte = st.number_input("Quantité", 1, max_value=int(p.stock))
             pu = st.number_input("Prix vente (Ar)", int(p.prix_vente))
@@ -232,7 +233,6 @@ else:
     c2.metric("Total Dépenses", mga(depenses))
     c3.metric("Profit Global", mga(recettes - depenses))
     
-    # Graphique
     m_plot = pd.read_sql("SELECT substr(date,1,10) as date, (qte*pu) as montant, type FROM mouvements", conn)
     j_plot = pd.read_sql("SELECT substr(date,1,10) as date, montant, type FROM journal", conn)
     total_data = pd.concat([m_plot, j_plot])
