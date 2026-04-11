@@ -64,7 +64,7 @@ with st.sidebar:
 if page=="Tableau de bord":
     st.header("📊 Tableau de bord")
     prod = pd.read_sql("SELECT * FROM produits", conn)
-    valeur_stock = (prod["stock"] * prod["prix_achat"]).sum()
+    valeur_stock = (prod["stock"] * prod["prix_vente"]).sum()
     
     mois_actuel = datetime.now().strftime("%Y-%m") + "%"
     v_prod = pd.read_sql("SELECT SUM(qte*pu) as val FROM mouvements WHERE type='VENTE' AND date LIKE ?", conn, params=(mois_actuel,)).val[0] or 0
