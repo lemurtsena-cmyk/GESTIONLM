@@ -16,11 +16,63 @@ st.set_page_config(
 # --- CSS PERSONNALISÉ ---
 st.markdown("""
 <style>
-/* ===== GLOBAL ===== */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+/* Fond global */
+.stApp {
+    background: #0b1220;
+    color: #e8eaf0;
+}
 
-html, body, [class*="css"] {
-    font-family: 'Inter', sans-serif;
+/* Sidebar */
+section[data-testid="stSidebar"]{
+    background: #0a1020 !important;
+}
+section[data-testid="stSidebar"] *{
+    color: #e8eaf0 !important;
+}
+
+/* Cartes / containers */
+.custom-card, div[data-testid="stMetric"], .stDataFrame {
+    background: #111a2e !important;
+    color: #e8eaf0 !important;
+    border: 1px solid rgba(255,255,255,0.08) !important;
+}
+
+/* Inputs */
+.stTextInput input, .stNumberInput input, .stSelectbox div[data-baseweb="select"] {
+    background: #0b1220 !important;
+    color: #e8eaf0 !important;
+    border: 1px solid rgba(255,255,255,0.15) !important;
+}
+.stTextInput label, .stNumberInput label, .stSelectbox label {
+    color: rgba(232,234,240,0.85) !important;
+}
+
+/* Tabs */
+.stTabs [data-baseweb="tab-list"]{
+    background: #0f1730 !important;
+}
+.stTabs [data-baseweb="tab"]{
+    color: rgba(232,234,240,0.85) !important;
+}
+.stTabs [aria-selected="true"]{
+    background: #667eea !important;
+    color: #fff !important;
+}
+
+/* Dataframe */
+div[data-testid="stDataFrame"]{
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+/* Boutons */
+.stButton > button, .stFormSubmitButton > button{
+    background: #667eea !important;
+    color: white !important;
+    border: none !important;
+}
+</style>
+""", unsafe_allow_html=True)
 }
 
 /* ===== SIDEBAR ===== */
