@@ -1381,6 +1381,3 @@ elif current_page == "compta":
 
 # Fermer le wrapper
 st.markdown('</div>', unsafe_allow_html=True)
-```
-
----
