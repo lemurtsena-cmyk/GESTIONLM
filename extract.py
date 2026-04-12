@@ -1171,7 +1171,5 @@ else:
                 "📥 Journal", csv_j, "journal.csv", 
                 "text/csv", use_container_width=True
             )
-```
 
----
 
