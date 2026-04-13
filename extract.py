@@ -1,5 +1,3 @@
---- START OF FILE TEST3.PY ---
-
 import streamlit as st
 import sqlite3, pandas as pd
 from datetime import datetime
@@ -348,5 +346,3 @@ else:
     c2.metric("Total Dépenses", mga(depenses_total))
     c3.metric("Bénéfice Global", mga(recettes_total - depenses_total), delta_color="normal")
 
-# AJOUTER SUPPRESSION OU MODIFICATION RECETTE - Implemented in Journalier page.
-# AJOUTER SUPPRESSION OU MODIFICATION PRODUIT - Implemented in Produits page.
